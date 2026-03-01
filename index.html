@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spectrum</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: 'Syne', sans-serif; }
+
+    #ui {
+      position: fixed;
+      bottom: 36px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    #fileLabel {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 22px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 100px;
+      background: rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.5);
+      font-family: 'Syne', sans-serif;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: all 0.3s;
+    }
+    #fileLabel:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.9); }
+    #fileInput { display: none; }
+
+    #playBtn {
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.06);
+      color: #fff; font-size: 18px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; backdrop-filter: blur(10px);
+      transition: all 0.2s; flex-shrink: 0;
+    }
+    #playBtn:hover { background: rgba(255,255,255,0.14); transform: scale(1.06); }
+    #playBtn.playing { border-color: rgba(120,200,255,0.4); box-shadow: 0 0 20px rgba(100,180,255,0.2); }
+
+    #hint {
+      position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.18); font-size: 11px;
+      letter-spacing: 0.15em; text-transform: uppercase; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="hint">move mouse to orbit</div>
+  <div id="ui">
+    <label id="fileLabel" for="fileInput">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Load Audio
+    </label>
+    <input type="file" id="fileInput" accept="audio/*" />
+    <button id="playBtn" title="Play / Pause">&#9654;</button>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script type="module">
+    import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm';
+
+    const params = { intensity: 1.0 };
+    const gui = new GUI({ width: 200 });
+    gui.add(params, 'intensity', 0.1, 5, 0.01).name('Intensity');
+
+    const BAR_COUNT  = 64;
+    const RADIUS     = 6;
+    const LERP       = 0.10;
+    const CAM_RADIUS = 24;
+    const GROUP_SIZE = 5;
+
+    /* ── camera orbit ── */
+    let targetAngle = 0, targetHeight = 16;
+    let currentAngle = 0, currentHeight = 16;
+    window.addEventListener('mousemove', (e) => {
+      targetAngle  = ((e.clientX / innerWidth)  * 2 - 1) * Math.PI;
+      targetHeight = 16 - ((e.clientY / innerHeight) * 2 - 1) * 11;
+    });
+
+    /* ── renderer / scene / camera ── */
+    const scene    = new THREE.Scene();
+    scene.background = new THREE.Color(0x050508);
+    scene.fog = new THREE.Fog(0x050508, 35, 75);
+
+    const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.1, 1000);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.4;
+    document.body.appendChild(renderer.domElement);
+
+    window.addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    /* ── lights ── */
+    scene.add(new THREE.AmbientLight(0xffffff, 0.08));
+
+    const rimL = new THREE.PointLight(0x3377ff, 5, 60);
+    rimL.position.set(-14, 20, 8);
+    scene.add(rimL);
+
+    const rimR = new THREE.PointLight(0xff2255, 5, 60);
+    rimR.position.set(14, 20, -8);
+    scene.add(rimR);
+
+    const topL = new THREE.PointLight(0xffffff, 2, 30);
+    topL.position.set(0, 25, 0);
+    scene.add(topL);
+
+    const pulseL = new THREE.PointLight(0x88ddff, 3, 18);
+    pulseL.position.set(0, 1, 0);
+    scene.add(pulseL);
+
+    /* ── floor ── */
+    const floorMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(120, 120),
+      new THREE.MeshStandardMaterial({ color: 0x0c0c14, roughness: 0.85, metalness: 0.25 })
+    );
+    floorMesh.rotation.x = -Math.PI / 2;
+    floorMesh.receiveShadow = true;
+    scene.add(floorMesh);
+
+    /* ══════════════════════════════
+       CENTER ORB  — sphere + rings
+    ══════════════════════════════ */
+    const orbGroup = new THREE.Group();
+    orbGroup.position.y = 1.1;
+    scene.add(orbGroup);
+
+    /* core sphere */
+    const orbGeo = new THREE.SphereGeometry(0.6, 48, 48);
+    const orbMat = new THREE.MeshPhysicalMaterial({
+      color:             0x99ddff,
+      emissive:          0x2299ff,
+      emissiveIntensity: 2.0,
+      roughness:         0.0,
+      metalness:         0.0,
+      transmission:      0.3,
+      thickness:         1.0,
+      ior:               1.8,
+      clearcoat:         1.0,
+      clearcoatRoughness:0.0,
+    });
+    const orb = new THREE.Mesh(orbGeo, orbMat);
+    orbGroup.add(orb);
+
+    /* wireframe shell — slightly larger */
+    const wireGeo = new THREE.SphereGeometry(0.66, 18, 18);
+    const wireMat = new THREE.MeshBasicMaterial({
+      color:       0x44aaff,
+      wireframe:   true,
+      transparent: true,
+      opacity:     0.18,
+    });
+    const wire = new THREE.Mesh(wireGeo, wireMat);
+    orbGroup.add(wire);
+
+    /* three orbital rings at different tilts */
+    const ringData = [
+      { rx: Math.PI / 2,     ry: 0,            color: 0x4488ff },
+      { rx: Math.PI / 5,     ry: Math.PI / 4,  color: 0xff44aa },
+      { rx: Math.PI / 3.5,   ry: -Math.PI / 3, color: 0x44ffcc },
+    ];
+    const rings = ringData.map(({ rx, ry, color }) => {
+      const geo = new THREE.TorusGeometry(1.05, 0.018, 16, 120);
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        emissive:          color,
+        emissiveIntensity: 0.8,
+        roughness:         0.1,
+        metalness:         0.5,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = rx;
+      mesh.rotation.y = ry;
+      orbGroup.add(mesh);
+      return mesh;
+    });
+
+    /* orbiting dot per ring */
+    const dotGeo = new THREE.SphereGeometry(0.06, 12, 12);
+    const dots   = rings.map((ring, i) => {
+      const mat  = new THREE.MeshStandardMaterial({
+        color:             ringData[i].color,
+        emissive:          ringData[i].color,
+        emissiveIntensity: 2,
+      });
+      const dot = new THREE.Mesh(dotGeo, mat);
+      ring.add(dot);
+      return dot;
+    });
+
+    /* ── bars ── */
+    const barGeo = new THREE.BoxGeometry(0.52, 1, 0.52);
+    const bars   = [];
+    const scales = new Float32Array(BAR_COUNT).fill(0.08);
+
+    /* per-bar idle phase offsets so they all move independently */
+    const idlePhase = new Float32Array(BAR_COUNT).map((_, i) =>
+      (i / BAR_COUNT) * Math.PI * 2
+    );
+    for (let i = 0; i < BAR_COUNT; i++) idlePhase[i] = (i / BAR_COUNT) * Math.PI * 2;
+
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const angle = (i / BAR_COUNT) * Math.PI * 2;
+      const t     = i / (BAR_COUNT - 1);
+      const color = new THREE.Color().setHSL(t, 1.0, 0.60);
+
+      const mat = new THREE.MeshPhysicalMaterial({
+        color,
+        emissive:           color,
+        emissiveIntensity:  0.05,
+        roughness:          0.04,
+        metalness:          0.0,
+        transmission:       0.55,
+        thickness:          0.6,
+        ior:                1.55,
+        reflectivity:       1.0,
+        clearcoat:          1.0,
+        clearcoatRoughness: 0.05,
+        transparent:        true,
+        opacity:            0.88,
+      });
+
+      const mesh = new THREE.Mesh(barGeo, mat);
+      mesh.position.x = Math.sin(angle) * RADIUS;
+      mesh.position.z = Math.cos(angle) * RADIUS;
+      mesh.rotation.y = -angle;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      bars.push({ mesh, angle });
+    }
+
+    /* ── audio ── */
+    let analyser, dataArray, audioCtx, sourceNode, audioBuffer;
+    let isPlaying  = false;
+    let pauseOffset = 0, startTime = 0;
+
+    const playBtn = document.getElementById('playBtn');
+
+    function startPlayback(offset = 0) {
+      if (!audioBuffer) return;
+      if (sourceNode) { try { sourceNode.stop(); } catch(_){} }
+      sourceNode        = audioCtx.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.connect(analyser);
+      analyser.connect(audioCtx.destination);
+      sourceNode.start(0, offset);
+      sourceNode.onended = () => {
+        isPlaying = false;
+        playBtn.innerHTML = '&#9654;';
+        playBtn.classList.remove('playing');
+      };
+      isPlaying = true;
+      playBtn.innerHTML = '&#9646;&#9646;';
+      playBtn.classList.add('playing');
+    }
+
+    playBtn.addEventListener('click', () => {
+      if (!audioBuffer) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (isPlaying) {
+        pauseOffset = audioCtx.currentTime - startTime;
+        sourceNode.stop();
+        isPlaying = false;
+        playBtn.innerHTML = '&#9654;';
+        playBtn.classList.remove('playing');
+      } else {
+        startTime = audioCtx.currentTime - pauseOffset;
+        startPlayback(pauseOffset);
+      }
+    });
+
+    document.getElementById('fileInput').addEventListener('change', function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      document.getElementById('fileLabel').innerHTML =
+        `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> ${file.name.slice(0, 22)}`;
+
+      if (audioCtx) audioCtx.close();
+      audioCtx = new AudioContext();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.78;
+      dataArray   = new Uint8Array(analyser.frequencyBinCount);
+      pauseOffset = 0;
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        audioCtx.decodeAudioData(ev.target.result, (buf) => {
+          audioBuffer = buf;
+          startTime   = audioCtx.currentTime;
+          startPlayback(0);
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    /* ── animation ── */
+    const clock = new THREE.Clock();
+
+    (function animate() {
+      requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+
+      /* camera */
+      currentAngle  += (targetAngle  - currentAngle)  * 0.05;
+      currentHeight += (targetHeight - currentHeight) * 0.05;
+      camera.position.set(
+        Math.sin(currentAngle) * CAM_RADIUS,
+        Math.max(1.5, currentHeight),
+        Math.cos(currentAngle) * CAM_RADIUS
+      );
+      camera.lookAt(0, 2, 0);
+
+      /* raw audio or zeros */
+      const rawFreq = new Float32Array(BAR_COUNT);
+      if (analyser && dataArray) {
+        analyser.getByteFrequencyData(dataArray);
+        for (let i = 0; i < BAR_COUNT; i++) rawFreq[i] = dataArray[i] / 255;
+      }
+
+      /* idle wave — always computed */
+      const idleFreq = new Float32Array(BAR_COUNT);
+      for (let i = 0; i < BAR_COUNT; i++) {
+        idleFreq[i] = 0.04
+          + 0.025 * Math.sin(t * 1.1 + idlePhase[i])
+          + 0.015 * Math.sin(t * 2.3 + idlePhase[i] * 1.7)
+          + 0.010 * Math.sin(t * 0.5 + idlePhase[i] * 0.8);
+      }
+
+      /* blend: when audio bar is quiet, keep the idle motion alive */
+      const freq = new Float32Array(BAR_COUNT);
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const audio = rawFreq[i];
+        /* blend factor — 0 → full idle, 1 → full audio */
+        const blend = Math.min(1, audio * 6);
+        freq[i] = idleFreq[i] * (1 - blend) + audio * blend;
+      }
+
+      /* group peak detection */
+      const groupPeak = new Uint8Array(BAR_COUNT);
+      for (let g = 0; g < BAR_COUNT; g += GROUP_SIZE) {
+        let best = g, bestVal = freq[g];
+        for (let k = 1; k < GROUP_SIZE && g + k < BAR_COUNT; k++) {
+          if (freq[g + k] > bestVal) { bestVal = freq[g + k]; best = g + k; }
+        }
+        groupPeak[best] = 1;
+      }
+
+      let avgFreq = 0, bassFreq = 0;
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const target = freq[i] * 22 * params.intensity + 0.08;
+        scales[i]   += (target - scales[i]) * LERP;
+
+        const { mesh } = bars[i];
+        mesh.scale.y    = scales[i];
+        mesh.position.y = scales[i] / 2;
+
+        const norm = Math.min(1, scales[i] / (22 * params.intensity + 0.08));
+        if (groupPeak[i]) {
+          mesh.material.emissiveIntensity = 0.2 + norm * 2.2;
+          mesh.material.transmission      = 0.15;
+          mesh.material.opacity           = 1.0;
+        } else {
+          mesh.material.emissiveIntensity = 0.02 + norm * 0.2;
+          mesh.material.transmission      = 0.55 + (1 - norm) * 0.2;
+          mesh.material.opacity           = 0.75 + norm * 0.2;
+        }
+
+        avgFreq += freq[i];
+        if (i < 4) bassFreq += freq[i];
+      }
+      avgFreq  /= BAR_COUNT;
+      bassFreq /= 4;
+
+      /* ─── ORB animation ─── */
+      const pulse = avgFreq * params.intensity;
+      const bass  = Math.min(1, bassFreq * params.intensity * 2);
+
+      /* slow idle spin + bass kick spin */
+      orbGroup.rotation.y = t * 0.18;
+
+      /* core scale pulses on bass */
+      const orbScale = 1.0 + bass * 0.45 + 0.04 * Math.sin(t * 3.5);
+      orb.scale.setScalar(orbScale);
+
+      /* emissive color shift with time */
+      const hueShift = (t * 0.08) % 1;
+      const emColor  = new THREE.Color().setHSL(hueShift, 1, 0.6);
+      orbMat.emissive.set(emColor);
+      orbMat.emissiveIntensity = 1.5 + pulse * 5;
+
+      /* wireframe breathes */
+      wire.scale.setScalar(1.0 + 0.06 * Math.sin(t * 2.1) + bass * 0.15);
+      wireMat.opacity = 0.12 + pulse * 0.25;
+
+      /* rings rotate at different speeds, react to bass */
+      rings[0].rotation.z = t * 0.7  + bass * 0.5;
+      rings[1].rotation.z = t * -0.5 + bass * 0.3;
+      rings[2].rotation.z = t * 0.9;
+      rings.forEach((ring, i) => {
+        const intensity = 0.6 + pulse * 2.5;
+        ring.material.emissiveIntensity = intensity;
+        /* ring scale breathes slightly */
+        const s = 1.0 + 0.05 * Math.sin(t * 1.4 + i) + bass * 0.12;
+        ring.scale.setScalar(s);
+      });
+
+      /* orbiting dots travel around their ring */
+      dots.forEach((dot, i) => {
+        const speed  = [1.2, -0.9, 1.6][i];
+        const angle  = t * speed;
+        const r      = 1.05;
+        dot.position.set(Math.cos(angle) * r, Math.sin(angle) * r, 0);
+        dot.material.emissiveIntensity = 1.5 + pulse * 4;
+      });
+
+      /* pulse light */
+      pulseL.intensity = 2 + pulse * 10;
+      pulseL.color.setHSL(hueShift, 1, 0.6);
+
+      renderer.render(scene, camera);
+    })();
+  </script>
+</body>
+</html>
