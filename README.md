@@ -1,15 +1,15 @@
 # music-visualizer
 
-🎵 Circular Music Visualizer
+Circular Music Visualizer
 
 A real-time 3D circular music visualizer built using Three.js and the Web Audio API.
 This project analyzes audio frequency data and renders a dynamic radial spectrum that reacts smoothly to music with cinematic lighting and glow effects.
 
-🚀 Short Description
+Short Description
 
 A browser-based 3D circular spectrum visualizer that maps real-time FFT frequency bins to animated bars arranged in a ring. Features smooth interpolation, reactive lighting, and atmospheric rendering — all in a single HTML file.
 
-✨ Features
+Features
 
 64 frequency bars arranged in a circular layout
 
@@ -27,7 +27,7 @@ Fully browser-based (no build tools required)
 
 Single-file implementation
 
-🛠 Tech Stack
+Tech Stack
 
 Three.js (r128) — 3D Rendering
 
@@ -35,14 +35,14 @@ Web Audio API — Audio Analysis
 
 HTML / CSS / JavaScript
 
-📂 Project Structure
+Project Structure
 music-visualizer/
  ├── index.html
  └── README.md
 
 Everything runs from index.html.
 
-▶️ How to Run
+How to Run
 
 Download or clone the repository
 
@@ -74,7 +74,7 @@ current += (target - current) * LERP
 
 Lighting intensity reacts to overall audio energy
 
-⚙️ Customization
+Customization
 
 You can easily modify:
 
@@ -90,7 +90,7 @@ Light colors and intensity
 
 Camera position and tilt
 
-🔮 Future Improvements
+Future Improvements
 
 Beat detection with peak tracking
 
@@ -108,7 +108,7 @@ Camera orbit animation
 
 Export visualization as video
 
-🧠 Architecture Overview
+Architecture Overview
 Audio Input
    ↓
 AudioContext
